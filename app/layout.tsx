@@ -22,10 +22,12 @@ export default function RootLayout({
             </Link>
 
             <nav>
-              <Link href="/inbox">Inbox</Link>
-              <Link href="/send">Send</Link>
-              <Link href="/otp">OTP</Link>
-            </nav>
+  <Link href="/inbox">Inbox</Link>
+  <Link href="/send">Send</Link>
+  <Link href="/otp">OTP</Link>
+  <Link href="/customers">Customers</Link>
+  <Link href="/campaigns">Campaigns</Link>
+</nav>
 
           </div>
         </header>
