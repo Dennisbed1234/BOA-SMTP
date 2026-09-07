@@ -252,5 +252,60 @@ textarea {
   .header-inner {
     flex-direction: column;
     gap: 15px;
-  }
+    .customer-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 15px 5px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.customer-row span {
+  color: #667085;
+}
+
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+
+.customer-selector {
+  max-height: 420px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  margin-bottom: 25px;
+}
+
+.customer-select {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  margin: 0;
+  border-bottom: 1px solid #edf0f4;
+  cursor: pointer;
+}
+
+.customer-select:last-child {
+  border-bottom: 0;
+}
+
+.customer-select input {
+  width: auto;
+}
+
+.customer-select span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.customer-select small {
+  color: #667085;
+ }
 }
