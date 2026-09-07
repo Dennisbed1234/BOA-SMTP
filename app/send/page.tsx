@@ -19,7 +19,33 @@ export default function SendPage() {
 
     const form = new FormData();
 
-    form.append("to", to);
+    /*
+     * Allow multiple recipients.
+     *
+     * You can enter:
+     *
+     * person1@gmail.com
+     * person2@gmail.com
+     * person3@gmail.com
+     *
+     * or:
+     *
+     * person1@gmail.com, person2@gmail.com, person3@gmail.com
+     */
+
+    const recipients = to
+      .split(/[\s,;]+/)
+      .map((email) => email.trim())
+      .filter(Boolean);
+
+    const uniqueRecipients = [
+      ...new Set(recipients)
+    ];
+
+    uniqueRecipients.forEach((email) => {
+      form.append("to", email);
+    });
+
     form.append("subject", subject);
     form.append("text", text);
     form.append("html", html);
@@ -43,11 +69,14 @@ export default function SendPage() {
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Failed to send email"
+          data.error ||
+            "Failed to send email"
         );
       }
 
-      setResult("Email sent successfully.");
+      setResult(
+        `Sent: ${data.sent} | Failed: ${data.failed} | Total: ${data.total}`
+      );
 
       setTo("");
       setSubject("");
@@ -75,21 +104,34 @@ export default function SendPage() {
 
         <form onSubmit={submit}>
 
-          <label>Recipient</label>
+          <label>Recipients</label>
 
-          <input
-            type="email"
+          <textarea
             value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="recipient@example.com"
+            onChange={(e) =>
+              setTo(e.target.value)
+            }
+            placeholder={
+              "recipient1@example.com\n" +
+              "recipient2@example.com\n" +
+              "recipient3@example.com"
+            }
+            rows={6}
             required
           />
+
+          <small className="muted">
+            Enter multiple email addresses separated
+            by commas, spaces, semicolons, or new lines.
+          </small>
 
           <label>Subject</label>
 
           <input
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
+            onChange={(e) =>
+              setSubject(e.target.value)
+            }
             placeholder="Your subject"
             required
           />
@@ -98,7 +140,9 @@ export default function SendPage() {
 
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) =>
+              setText(e.target.value)
+            }
             placeholder="Plain text message"
             rows={6}
           />
@@ -107,7 +151,9 @@ export default function SendPage() {
 
           <textarea
             value={html}
-            onChange={(e) => setHtml(e.target.value)}
+            onChange={(e) =>
+              setHtml(e.target.value)
+            }
             placeholder="<h1>Hello</h1><p>Your HTML message...</p>"
             rows={10}
           />
