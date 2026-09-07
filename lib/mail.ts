@@ -10,18 +10,60 @@ function randHex(n: number) {
   return s;
 }
 
+/** Extract a bare email from messy env values like `BANK OF AMERICA <user@gmail.com>` */
+function extractEmail(raw: string): string {
+  const s = (raw || "").trim();
+  if (!s) return "";
+  const angle = s.match(/<([^>]+@[^>]+)>/);
+  if (angle) return angle[1].trim().toLowerCase();
+  const plain = s.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+  if (plain) return plain[0].toLowerCase();
+  return s.toLowerCase();
+}
+
+/** Display name only — strip emails and angle brackets */
+function cleanDisplayName(raw: string, fallback: string): string {
+  let s = (raw || "").trim();
+  if (!s) return fallback;
+  s = s.replace(/<[^>]*>/g, "");
+  s = s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "");
+  s = s.replace(/["\\]/g, "").replace(/\s+/g, " ").trim();
+  // Avoid empty or spammy mega brand spoofing in From name if user put full bank name in MAIL_FROM
+  if (!s || s.length > 40) return fallback;
+  return s;
+}
+
 export function getMailConfig() {
-  const user = (process.env.SMTP_USER || "").trim();
+  const user = extractEmail(process.env.SMTP_USER || "");
   const pass = (process.env.SMTP_PASS || "").trim();
-  // Prefer MAIL_FROM, but fall back to SMTP_USER (must match Gmail account)
-  const fromEmail = (process.env.MAIL_FROM || user).trim();
-  const fromName = (process.env.MAIL_FROM_NAME || "BOA").replace(/["\\]/g, "").trim();
-  const replyTo = (process.env.MAIL_REPLY_TO || fromEmail).trim();
+
+  // MAIL_FROM may be wrongly set to `BANK OF AMERICA <email@gmail.com>` — strip to email only
+  let fromEmail = extractEmail(process.env.MAIL_FROM || "") || user;
+
+  // Gmail requires From address to match authenticated user (or verified alias)
+  if (user && fromEmail && fromEmail !== user) {
+    // Keep user as From email to avoid 550 rejects; display name still BOA
+    console.warn(
+      `MAIL_FROM (${fromEmail}) differs from SMTP_USER (${user}); using SMTP_USER for From address.`
+    );
+    fromEmail = user;
+  }
+
+  // Prefer explicit MAIL_FROM_NAME=BOA; never take "BANK OF AMERICA" from a bad MAIL_FROM string
+  const fromName = cleanDisplayName(
+    process.env.MAIL_FROM_NAME || "BOA",
+    "BOA"
+  );
+
+  const replyTo =
+    extractEmail(process.env.MAIL_REPLY_TO || "") || fromEmail || user;
+
   const host = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
 
+  // Single clean format: "BOA" <user@gmail.com>
   const from =
-    fromName && fromEmail ? `"${fromName}" <${fromEmail}>` : fromEmail;
+    fromName && fromEmail ? `"${fromName}" <${fromEmail}>` : fromEmail || user;
 
   return { user, pass, fromEmail, fromName, from, replyTo, host, port };
 }
@@ -46,7 +88,6 @@ function getTransporter(): Transporter {
     );
   }
 
-  // Explicit host/port is more reliable than service:"gmail" on serverless
   transporter = nodemailer.createTransport({
     host,
     port,
@@ -64,32 +105,45 @@ function getTransporter(): Transporter {
 export function formatSmtpError(error: unknown): string {
   const e = error as any;
   const raw = String(e?.response || e?.message || e || "SMTP error");
-  const code = e?.code || e?.responseCode || "";
+  const code = String(e?.code || e?.responseCode || "");
 
-  if (/Invalid login|EAUTH|535|Username and Password not accepted/i.test(raw) || code === "EAUTH") {
+  if (
+    /Invalid login|EAUTH|535|Username and Password not accepted/i.test(raw) ||
+    code === "EAUTH"
+  ) {
     return (
       "Gmail login failed. Use a 16-character App Password (Google Account → Security → 2-Step Verification → App passwords). " +
-      "SMTP_USER must be the full Gmail address. SMTP_PASS must be the App Password (spaces optional)."
+      "SMTP_USER = full Gmail. SMTP_PASS = App Password."
     );
   }
 
-  if (/Daily user sending limit|rate|421|450/i.test(raw)) {
-    return "Gmail sending limit or rate limit hit. Wait and try a smaller batch.";
+  // Specific limit messages only — do not match generic word "rate"
+  if (
+    /Daily user sending limit|User-rate limit exceeded|Mail sending limit|421-4\.7\.0|421 4\.7\.0/i.test(
+      raw
+    )
+  ) {
+    return "Gmail daily/sending limit hit. Wait a few hours or use Google Workspace.";
   }
 
   if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ESOCKET/i.test(raw)) {
-    return `Cannot reach SMTP server (${raw}). Check network / SMTP_HOST.`;
+    return `Cannot reach SMTP server (${raw}). Check SMTP_HOST / network.`;
   }
 
-  if (/550|553|Sender address rejected|not allowed to send/i.test(raw)) {
+  if (
+    /550|553|Sender address rejected|not allowed to send|Invalid From/i.test(
+      raw
+    )
+  ) {
     return (
-      "Gmail rejected the From address. MAIL_FROM must be the same as SMTP_USER " +
-      "(or a Send mail as alias configured in that Gmail account). " +
-      raw.slice(0, 180)
+      "Gmail rejected From. On Vercel set: MAIL_FROM=your@gmail.com and MAIL_FROM_NAME=BOA " +
+      "(do not put BANK OF AMERICA inside MAIL_FROM). " +
+      raw.slice(0, 200)
     );
   }
 
-  return raw.slice(0, 400);
+  // Surface real provider message
+  return raw.slice(0, 500);
 }
 
 function stripHtml(html: string) {
@@ -102,7 +156,10 @@ function stripHtml(html: string) {
     .trim();
 }
 
-export async function verifyMailConnection(): Promise<{ ok: boolean; error?: string }> {
+export async function verifyMailConnection(): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
   try {
     if (!isMailConfigured()) {
       return { ok: false, error: "SMTP_USER / SMTP_PASS not set" };
@@ -136,13 +193,12 @@ export async function sendMail({
   const cfg = getMailConfig();
   const t = getTransporter();
 
-  // Always provide both parts when possible (helps inbox placement)
-  let plain =
+  const plain =
     (text && text.trim()) ||
     (html ? stripHtml(html) : "") ||
     ".";
 
-  let rich =
+  const rich =
     (html && html.trim()) ||
     (text
       ? `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#222">${text
@@ -181,7 +237,11 @@ export async function sendMail({
 
     return info;
   } catch (e) {
-    if (/EAUTH|Invalid login|535/i.test(String((e as any)?.message || (e as any)?.code || ""))) {
+    if (
+      /EAUTH|Invalid login|535/i.test(
+        String((e as any)?.message || (e as any)?.code || "")
+      )
+    ) {
       resetTransporter();
     }
     throw new Error(formatSmtpError(e));
