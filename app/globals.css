@@ -252,7 +252,10 @@ textarea {
   .header-inner {
     flex-direction: column;
     gap: 15px;
-    .customer-row {
+  }
+}
+
+.customer-row {
   display: flex;
   justify-content: space-between;
   gap: 20px;
@@ -307,5 +310,4 @@ textarea {
 
 .customer-select small {
   color: #667085;
- }
 }
