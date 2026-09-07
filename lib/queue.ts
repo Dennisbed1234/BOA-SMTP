@@ -1,8 +1,26 @@
 import crypto from "crypto";
 import { sql } from "@/lib/db";
-import { sendMail } from "@/lib/mail";
+import { sendMail, getMailConfig } from "@/lib/mail";
 
 const BATCH_SIZE = 5;
+
+function attachmentBuffer(data: unknown): Buffer | null {
+  if (!data) return null;
+  if (Buffer.isBuffer(data)) return data;
+  if (data instanceof Uint8Array) return Buffer.from(data);
+  if (typeof data === "string") {
+    // Prefer base64 if it looks like it; otherwise utf8
+    try {
+      if (/^[A-Za-z0-9+/=\s]+$/.test(data) && data.length > 20) {
+        return Buffer.from(data.replace(/\s/g, ""), "base64");
+      }
+    } catch {
+      // fall through
+    }
+    return Buffer.from(data, "utf8");
+  }
+  return null;
+}
 
 export async function processCampaign(campaignId: string) {
   const campaigns = await sql`
@@ -61,31 +79,34 @@ export async function processCampaign(campaignId: string) {
 
   let sent = 0;
   let failed = 0;
+  const cfg = getMailConfig();
 
   for (const recipient of recipients) {
     try {
-      const attachments = [];
+      const attachments: {
+        filename: string;
+        content: Buffer;
+        contentType?: string;
+      }[] = [];
 
-      if (
-        campaign.attachment_data &&
-        campaign.attachment_filename
-      ) {
-        attachments.push({
-          filename: campaign.attachment_filename,
-          content: Buffer.from(
-            campaign.attachment_data
-          ),
-          contentType:
-            campaign.attachment_content_type ||
-            undefined
-        });
+      if (campaign.attachment_data && campaign.attachment_filename) {
+        const content = attachmentBuffer(campaign.attachment_data);
+        if (content) {
+          attachments.push({
+            filename: String(campaign.attachment_filename),
+            content,
+            contentType: campaign.attachment_content_type
+              ? String(campaign.attachment_content_type)
+              : undefined
+          });
+        }
       }
 
       await sendMail({
-        to: recipient.email,
-        subject: campaign.subject,
-        text: campaign.text_body || undefined,
-        html: campaign.html_body || undefined,
+        to: String(recipient.email),
+        subject: String(campaign.subject),
+        text: campaign.text_body ? String(campaign.text_body) : undefined,
+        html: campaign.html_body ? String(campaign.html_body) : undefined,
         attachments
       });
 
@@ -98,34 +119,35 @@ export async function processCampaign(campaignId: string) {
         WHERE id = ${recipient.id}
       `;
 
-      await sql`
-        INSERT INTO emails (
-          id,
-          sender,
-          recipient,
-          subject,
-          text_body,
-          html_body,
-          message_type
-        )
-        VALUES (
-          ${crypto.randomUUID()},
-          ${process.env.MAIL_FROM || process.env.SMTP_USER || ""},
-          ${recipient.email},
-          ${campaign.subject},
-          ${campaign.text_body},
-          ${campaign.html_body},
-          'campaign'
-        )
-      `;
+      try {
+        await sql`
+          INSERT INTO emails (
+            id,
+            sender,
+            recipient,
+            subject,
+            text_body,
+            html_body,
+            message_type
+          )
+          VALUES (
+            ${crypto.randomUUID()},
+            ${cfg.fromEmail || cfg.user || ""},
+            ${recipient.email},
+            ${campaign.subject},
+            ${campaign.text_body},
+            ${campaign.html_body},
+            'campaign'
+          )
+        `;
+      } catch (dbErr) {
+        console.warn("campaign email log failed:", dbErr);
+      }
 
       sent++;
-
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : "Unknown error";
+        error instanceof Error ? error.message : "Unknown error";
 
       await sql`
         UPDATE campaign_recipients
@@ -146,9 +168,7 @@ export async function processCampaign(campaignId: string) {
       AND status = 'pending'
   `;
 
-  const remaining = Number(
-    remainingResult[0]?.count || 0
-  );
+  const remaining = Number(remainingResult[0]?.count || 0);
 
   if (remaining === 0) {
     await sql`
@@ -165,9 +185,6 @@ export async function processCampaign(campaignId: string) {
     sent,
     failed,
     remaining,
-    status:
-      remaining === 0
-        ? "completed"
-        : "sending"
+    status: remaining === 0 ? "completed" : "sending"
   };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 export default function SendPage() {
   const [to, setTo] = useState("");
@@ -10,37 +10,36 @@ export default function SendPage() {
   const [files, setFiles] = useState<FileList | null>(null);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState("");
+  const [errors, setErrors] = useState<string[]>([]);
+  const [smtp, setSmtp] = useState<{
+    configured?: boolean;
+    user?: string | null;
+    from?: string | null;
+    fromName?: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/send")
+      .then((r) => r.json())
+      .then(setSmtp)
+      .catch(() => setSmtp({ configured: false }));
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
 
     setSending(true);
     setResult("");
+    setErrors([]);
 
     const form = new FormData();
-
-    /*
-     * Allow multiple recipients.
-     *
-     * You can enter:
-     *
-     * person1@gmail.com
-     * person2@gmail.com
-     * person3@gmail.com
-     *
-     * or:
-     *
-     * person1@gmail.com, person2@gmail.com, person3@gmail.com
-     */
 
     const recipients = to
       .split(/[\s,;]+/)
       .map((email) => email.trim())
       .filter(Boolean);
 
-    const uniqueRecipients = [
-      ...new Set(recipients)
-    ];
+    const uniqueRecipients = [...new Set(recipients)];
 
     uniqueRecipients.forEach((email) => {
       form.append("to", email);
@@ -57,38 +56,38 @@ export default function SendPage() {
     }
 
     try {
-      const response = await fetch(
-        "/api/send",
-        {
-          method: "POST",
-          body: form
-        }
-      );
+      const response = await fetch("/api/send", {
+        method: "POST",
+        body: form
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Failed to send email"
-        );
+        throw new Error(data.error || "Failed to send email");
       }
 
       setResult(
-        `Sent: ${data.sent} | Failed: ${data.failed} | Total: ${data.total}`
+        `Sent: ${data.sent} | Failed: ${data.failed} | Total: ${data.total}` +
+          (data.from ? ` | From: ${data.from}` : "")
       );
 
-      setTo("");
-      setSubject("");
-      setText("");
-      setHtml("");
-      setFiles(null);
+      const failMsgs = (data.results || [])
+        .filter((r: any) => !r.success)
+        .map((r: any) => `${r.email}: ${r.error || "failed"}`);
 
+      setErrors(failMsgs);
+
+      if (data.failed === 0) {
+        setTo("");
+        setSubject("");
+        setText("");
+        setHtml("");
+        setFiles(null);
+      }
     } catch (error) {
       setResult(
-        error instanceof Error
-          ? error.message
-          : "Something went wrong"
+        error instanceof Error ? error.message : "Something went wrong"
       );
     }
 
@@ -97,20 +96,38 @@ export default function SendPage() {
 
   return (
     <main className="container narrow">
-
       <div className="card">
-
         <h1>Send Email</h1>
 
-        <form onSubmit={submit}>
+        {smtp && (
+          <div
+            className="result"
+            style={{
+              marginBottom: 16,
+              opacity: 0.95,
+              borderColor: smtp.configured ? undefined : "#f87171"
+            }}
+          >
+            {smtp.configured ? (
+              <>
+                SMTP ready as <strong>{smtp.fromName || "BOA"}</strong>{" "}
+                &lt;{smtp.from || smtp.user}&gt;
+              </>
+            ) : (
+              <>
+                SMTP not configured. Set SMTP_USER, SMTP_PASS, MAIL_FROM on
+                Vercel.
+              </>
+            )}
+          </div>
+        )}
 
+        <form onSubmit={submit}>
           <label>Recipients</label>
 
           <textarea
             value={to}
-            onChange={(e) =>
-              setTo(e.target.value)
-            }
+            onChange={(e) => setTo(e.target.value)}
             placeholder={
               "recipient1@example.com\n" +
               "recipient2@example.com\n" +
@@ -121,17 +138,15 @@ export default function SendPage() {
           />
 
           <small className="muted">
-            Enter multiple email addresses separated
-            by commas, spaces, semicolons, or new lines.
+            Enter multiple email addresses separated by commas, spaces,
+            semicolons, or new lines.
           </small>
 
           <label>Subject</label>
 
           <input
             value={subject}
-            onChange={(e) =>
-              setSubject(e.target.value)
-            }
+            onChange={(e) => setSubject(e.target.value)}
             placeholder="Your subject"
             required
           />
@@ -140,9 +155,7 @@ export default function SendPage() {
 
           <textarea
             value={text}
-            onChange={(e) =>
-              setText(e.target.value)
-            }
+            onChange={(e) => setText(e.target.value)}
             placeholder="Plain text message"
             rows={6}
           />
@@ -151,9 +164,7 @@ export default function SendPage() {
 
           <textarea
             value={html}
-            onChange={(e) =>
-              setHtml(e.target.value)
-            }
+            onChange={(e) => setHtml(e.target.value)}
             placeholder="<h1>Hello</h1><p>Your HTML message...</p>"
             rows={10}
           />
@@ -163,30 +174,27 @@ export default function SendPage() {
           <input
             type="file"
             multiple
-            onChange={(e) =>
-              setFiles(e.target.files)
-            }
+            onChange={(e) => setFiles(e.target.files)}
           />
 
-          <button
-            className="button primary full"
-            disabled={sending}
-          >
-            {sending
-              ? "Sending..."
-              : "Send Email"}
+          <button className="button primary full" disabled={sending}>
+            {sending ? "Sending..." : "Send Email"}
           </button>
-
         </form>
 
-        {result && (
-          <div className="result">
-            {result}
+        {result && <div className="result">{result}</div>}
+
+        {errors.length > 0 && (
+          <div className="result" style={{ marginTop: 12 }}>
+            <strong>Errors</strong>
+            <ul style={{ margin: "8px 0 0", paddingLeft: 18 }}>
+              {errors.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
           </div>
         )}
-
       </div>
-
     </main>
   );
 }
