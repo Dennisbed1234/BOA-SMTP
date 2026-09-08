@@ -20,7 +20,6 @@ function extractEmail(raw: string): string {
   return s.includes("@") ? s.toLowerCase() : "";
 }
 
-/** Removes < > and trailing junk so BOA> becomes BOA */
 function cleanDisplayName(raw: string, fallback: string): string {
   let s = (raw || "").trim();
   if (!s) return fallback;
@@ -45,9 +44,10 @@ export function getMailConfig() {
     fromEmail = user;
   }
 
+  // Chase Global — display as CHASE
   const fromName = cleanDisplayName(
-    process.env.MAIL_FROM_NAME || "BOA",
-    "BOA"
+    process.env.MAIL_FROM_NAME || "CHASE",
+    "CHASE"
   );
 
   const replyTo =
@@ -56,7 +56,6 @@ export function getMailConfig() {
   const host = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
 
-  // Object form prevents accidental BOA> in the header
   const from =
     fromName && fromEmail
       ? { name: fromName, address: fromEmail }
@@ -132,7 +131,7 @@ export function formatSmtpError(error: unknown): string {
     )
   ) {
     return (
-      "Gmail rejected From. Set MAIL_FROM=email only and MAIL_FROM_NAME=BOA. " +
+      "Gmail rejected From. Set MAIL_FROM=email only and MAIL_FROM_NAME=CHASE. " +
       raw.slice(0, 200)
     );
   }
