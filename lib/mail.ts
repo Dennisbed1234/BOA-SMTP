@@ -10,7 +10,6 @@ function randHex(n: number) {
   return s;
 }
 
-/** Extract a bare email from messy env values like `BANK OF AMERICA <user@gmail.com>` */
 function extractEmail(raw: string): string {
   const s = (raw || "").trim();
   if (!s) return "";
@@ -18,17 +17,17 @@ function extractEmail(raw: string): string {
   if (angle) return angle[1].trim().toLowerCase();
   const plain = s.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
   if (plain) return plain[0].toLowerCase();
-  return s.toLowerCase();
+  return s.includes("@") ? s.toLowerCase() : "";
 }
 
-/** Display name only — strip emails and angle brackets */
+/** Removes < > and trailing junk so BOA> becomes BOA */
 function cleanDisplayName(raw: string, fallback: string): string {
   let s = (raw || "").trim();
   if (!s) return fallback;
-  s = s.replace(/<[^>]*>/g, "");
+  s = s.replace(/[<>"']/g, "");
   s = s.replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "");
-  s = s.replace(/["\\]/g, "").replace(/\s+/g, " ").trim();
-  // Avoid empty or spammy mega brand spoofing in From name if user put full bank name in MAIL_FROM
+  s = s.replace(/\s+/g, " ").trim();
+  s = s.replace(/^[\s:>\-]+|[\s:<>\-]+$/g, "").trim();
   if (!s || s.length > 40) return fallback;
   return s;
 }
@@ -37,19 +36,15 @@ export function getMailConfig() {
   const user = extractEmail(process.env.SMTP_USER || "");
   const pass = (process.env.SMTP_PASS || "").trim();
 
-  // MAIL_FROM may be wrongly set to `BANK OF AMERICA <email@gmail.com>` — strip to email only
   let fromEmail = extractEmail(process.env.MAIL_FROM || "") || user;
 
-  // Gmail requires From address to match authenticated user (or verified alias)
   if (user && fromEmail && fromEmail !== user) {
-    // Keep user as From email to avoid 550 rejects; display name still BOA
     console.warn(
       `MAIL_FROM (${fromEmail}) differs from SMTP_USER (${user}); using SMTP_USER for From address.`
     );
     fromEmail = user;
   }
 
-  // Prefer explicit MAIL_FROM_NAME=BOA; never take "BANK OF AMERICA" from a bad MAIL_FROM string
   const fromName = cleanDisplayName(
     process.env.MAIL_FROM_NAME || "BOA",
     "BOA"
@@ -61,9 +56,11 @@ export function getMailConfig() {
   const host = (process.env.SMTP_HOST || "smtp.gmail.com").trim();
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
 
-  // Single clean format: "BOA" <user@gmail.com>
+  // Object form prevents accidental BOA> in the header
   const from =
-    fromName && fromEmail ? `"${fromName}" <${fromEmail}>` : fromEmail || user;
+    fromName && fromEmail
+      ? { name: fromName, address: fromEmail }
+      : fromEmail || user;
 
   return { user, pass, fromEmail, fromName, from, replyTo, host, port };
 }
@@ -112,12 +109,11 @@ export function formatSmtpError(error: unknown): string {
     code === "EAUTH"
   ) {
     return (
-      "Gmail login failed. Use a 16-character App Password (Google Account → Security → 2-Step Verification → App passwords). " +
+      "Gmail login failed. Use a 16-character App Password. " +
       "SMTP_USER = full Gmail. SMTP_PASS = App Password."
     );
   }
 
-  // Specific limit messages only — do not match generic word "rate"
   if (
     /Daily user sending limit|User-rate limit exceeded|Mail sending limit|421-4\.7\.0|421 4\.7\.0/i.test(
       raw
@@ -136,13 +132,11 @@ export function formatSmtpError(error: unknown): string {
     )
   ) {
     return (
-      "Gmail rejected From. On Vercel set: MAIL_FROM=your@gmail.com and MAIL_FROM_NAME=BOA " +
-      "(do not put BANK OF AMERICA inside MAIL_FROM). " +
+      "Gmail rejected From. Set MAIL_FROM=email only and MAIL_FROM_NAME=BOA. " +
       raw.slice(0, 200)
     );
   }
 
-  // Surface real provider message
   return raw.slice(0, 500);
 }
 
