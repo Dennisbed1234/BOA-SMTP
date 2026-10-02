@@ -18,7 +18,7 @@ export default function RootLayout({
           <div className="header-inner">
 
             <Link href="/" className="brand">
-              📬 Mail Tester
+              📬 Capital One Blast
             </Link>
 
             <nav>
