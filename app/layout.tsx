@@ -2,7 +2,7 @@ import "./globals.css";
 import Link from "next/link";
 
 export const metadata = {
-  title: "Mail Tester",
+  title: "CAPITAL ONE BLAST",
   description: "Email testing and delivery platform"
 };
 
